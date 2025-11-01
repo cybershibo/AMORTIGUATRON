@@ -1,0 +1,35 @@
+@echo off
+echo ========================================
+echo Construyendo ejecutable portable (con consola)...
+echo ========================================
+echo.
+
+REM Verificar que PyInstaller esté instalado
+python -c "import PyInstaller" 2>nul
+if errorlevel 1 (
+    echo PyInstaller no está instalado. Instalando...
+    pip install pyinstaller
+)
+
+echo.
+echo Instalando dependencias...
+pip install -r requirements.txt
+
+echo.
+echo Creando ejecutable...
+pyinstaller --name="SensorMonitor" ^
+    --onefile ^
+    --icon=NONE ^
+    --add-data "requirements.txt;." ^
+    --hidden-import=serial ^
+    --hidden-import=matplotlib ^
+    --hidden-import=matplotlib.backends.backend_tkagg ^
+    --collect-all=matplotlib ^
+    src/graph.py
+
+echo.
+echo ========================================
+echo Ejecutable creado en: dist\SensorMonitor.exe
+echo ========================================
+pause
+
