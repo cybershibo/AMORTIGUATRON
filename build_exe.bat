@@ -23,8 +23,12 @@ pyinstaller --name="SensorMonitor" ^
     --icon=NONE ^
     --add-data "requirements.txt;." ^
     --hidden-import=serial ^
+    --hidden-import=serial.tools.list_ports ^
     --hidden-import=matplotlib ^
     --hidden-import=matplotlib.backends.backend_tkagg ^
+    --hidden-import=matplotlib.backends._backend_tk ^
+    --hidden-import=tkinter ^
+    --hidden-import=tkinter.ttk ^
     --collect-all=matplotlib ^
     --noconsole ^
     src/graph.py

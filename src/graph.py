@@ -1,12 +1,18 @@
 import serial
+import serial.tools.list_ports
+import matplotlib
+matplotlib.use('TkAgg')  # Forzar backend TkAgg para compatibilidad
 import matplotlib.pyplot as plt
 from collections import deque
 import time
 import csv
 from datetime import datetime
 import os
+import sys
+import tkinter as tk
+from tkinter import ttk, messagebox
 
-SERIAL_PORT = 'COM4'
+SERIAL_PORT = 'COM1'  # Puerto por defecto
 SERIAL_BAUD = 115200
 READ_TIMEOUT = 1.0  # timeout de lectura en segundos
 RECONNECT_DELAY = 2.0  # tiempo de espera antes de reconectar
@@ -18,14 +24,130 @@ session_start_time = datetime.now()
 was_connected = False
 disconnection_count = 0
 
+def select_com_port():
+    """Muestra una ventana para seleccionar el puerto COM."""
+    global SERIAL_PORT
+    
+    # Obtener lista de puertos disponibles
+    ports = serial.tools.list_ports.comports()
+    available_ports = [port.device for port in ports]
+    
+    if not available_ports:
+        root = tk.Tk()
+        root.withdraw()  # Ocultar ventana principal
+        messagebox.showerror(
+            "Error", 
+            "No se encontraron puertos COM disponibles.\n\n"
+            "Por favor:\n"
+            "1. Conecta tu microcontrolador\n"
+            "2. Verifica que el driver esté instalado\n"
+            "3. Reintenta"
+        )
+        root.destroy()
+        return None
+    
+    # Crear ventana de selección
+    root = tk.Tk()
+    root.title("Seleccionar Puerto COM")
+    root.geometry("400x250")
+    root.resizable(False, False)
+    
+    # Centrar ventana
+    root.update_idletasks()
+    width = root.winfo_width()
+    height = root.winfo_height()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f'{width}x{height}+{x}+{y}')
+    
+    selected_port = tk.StringVar(value=SERIAL_PORT if SERIAL_PORT in available_ports else available_ports[0])
+    
+    # Frame principal
+    main_frame = ttk.Frame(root, padding="20")
+    main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    
+    # Título
+    title_label = ttk.Label(main_frame, text="Selecciona el Puerto COM:", font=("Arial", 10, "bold"))
+    title_label.grid(row=0, column=0, columnspan=2, pady=(0, 15), sticky=tk.W)
+    
+    # Información adicional
+    info_label = ttk.Label(
+        main_frame, 
+        text="Selecciona el puerto donde está conectado tu microcontrolador:",
+        font=("Arial", 8)
+    )
+    info_label.grid(row=1, column=0, columnspan=2, pady=(0, 10), sticky=tk.W)
+    
+    # Lista de puertos
+    port_frame = ttk.Frame(main_frame)
+    port_frame.grid(row=2, column=0, columnspan=2, pady=(0, 15), sticky=(tk.W, tk.E))
+    
+    for i, port in enumerate(available_ports):
+        # Obtener descripción del puerto si está disponible
+        port_info = next((p for p in ports if p.device == port), None)
+        port_description = ""
+        if port_info:
+            port_description = f" - {port_info.description}" if port_info.description else ""
+        
+        radio = ttk.Radiobutton(
+            port_frame,
+            text=f"{port}{port_description}",
+            variable=selected_port,
+            value=port
+        )
+        radio.grid(row=i, column=0, sticky=tk.W, pady=2)
+    
+    # Botones
+    button_frame = ttk.Frame(main_frame)
+    button_frame.grid(row=3, column=0, columnspan=2, pady=(10, 0))
+    
+    def on_ok():
+        root.quit()
+        root.destroy()
+    
+    def on_cancel():
+        selected_port.set(None)
+        root.quit()
+        root.destroy()
+    
+    ok_button = ttk.Button(button_frame, text="Aceptar", command=on_ok, width=12)
+    ok_button.grid(row=0, column=0, padx=5)
+    
+    cancel_button = ttk.Button(button_frame, text="Cancelar", command=on_cancel, width=12)
+    cancel_button.grid(row=0, column=1, padx=5)
+    
+    # Hacer que Enter y Escape funcionen
+    root.bind('<Return>', lambda e: on_ok())
+    root.bind('<Escape>', lambda e: on_cancel())
+    
+    # Centrar en pantalla y mostrar
+    root.focus()
+    root.mainloop()
+    
+    port = selected_port.get()
+    return port
+
 def connect_serial():
     """Intenta conectar al puerto serie. Retorna True si tiene éxito."""
-    global ser
+    global ser, SERIAL_PORT
     try:
         if ser is not None and ser.is_open:
             ser.close()
+        
+        # Verificar que el puerto exista antes de intentar conectar
+        available_ports = [port.device for port in serial.tools.list_ports.comports()]
+        if SERIAL_PORT not in available_ports:
+            print(f"Puerto {SERIAL_PORT} no está disponible.")
+            # Intentar encontrar otro puerto
+            if available_ports:
+                SERIAL_PORT = available_ports[0]
+                print(f"Usando puerto alternativo: {SERIAL_PORT}")
+            else:
+                print("No hay puertos COM disponibles.")
+                return False
+        
         ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=READ_TIMEOUT)
-        time.sleep(2)  # esperar a que se estabilice la conexión
+        time.sleep(1)  # esperar a que se estabilice la conexión
         ser.reset_input_buffer()  # limpiar buffer de entrada
         print(f"Conectado a {SERIAL_PORT}")
         return True
@@ -34,6 +156,8 @@ def connect_serial():
         return False
     except Exception as e:
         print(f"Error inesperado al conectar: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # Crear nombre del archivo CSV con formato: sesion-YYYYMMDD-HHMMSS.csv
@@ -64,14 +188,18 @@ def log_to_csv(sensor1, sensor2, estado):
         except Exception as e:
             print(f"Error al escribir en CSV: {e}")
 
-# Conectar inicialmente
-if not connect_serial():
-    print("No se pudo conectar inicialmente. El programa seguirá intentando...")
-    if csv_writer is not None:
-        log_to_csv(0, 0, "Sin conexion inicial")
-
-plt.ion()
-fig, ax = plt.subplots()
+# Inicializar matplotlib PRIMERO para asegurar que la ventana se muestre
+try:
+    plt.ion()
+    fig, ax = plt.subplots()
+    fig.canvas.manager.set_window_title('Monitor de Sensores')
+    # Forzar actualización inicial de la ventana
+    plt.show(block=False)
+    plt.pause(0.1)  # Dar tiempo para que la ventana se renderice
+    print("Ventana gráfica inicializada correctamente")
+except Exception as e:
+    print(f"ERROR CRÍTICO al inicializar matplotlib: {e}")
+    sys.exit(1)
 
 data1 = deque([0]*100, maxlen=100)
 data2 = deque([0]*100, maxlen=100)
@@ -90,14 +218,43 @@ current_d2 = 0.0
 
 # Crear textbox para mostrar valores actuales
 # Posicionado en la esquina superior derecha de la gráfica
-textbox = ax.text(0.98, 0.98, '', transform=ax.transAxes,
+textbox = ax.text(0.98, 0.98, 'Inicializando...', transform=ax.transAxes,
                   verticalalignment='top', horizontalalignment='right',
                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
                   fontsize=11, family='monospace')
 
+# Actualizar ventana inicial
+plt.draw()
+plt.pause(0.1)
+
+# Permitir al usuario seleccionar el puerto COM
+selected_port = select_com_port()
+
+if selected_port is None:
+    print("No se seleccionó ningún puerto. Cerrando programa...")
+    sys.exit(0)
+
+SERIAL_PORT = selected_port
+print(f"Puerto seleccionado: {SERIAL_PORT}")
+
 last_update_time = time.time()
 consecutive_errors = 0
 MAX_CONSECUTIVE_ERRORS = 10
+
+# Actualizar textbox con el puerto seleccionado
+textbox.set_text(f'Puerto: {SERIAL_PORT}\nConectando...')
+plt.draw()
+plt.pause(0.1)
+
+# Conectar inicialmente DESPUÉS de que la ventana esté lista
+print(f"Intentando conectar a {SERIAL_PORT}...")
+if not connect_serial():
+    print("No se pudo conectar inicialmente. El programa seguirá intentando...")
+    if csv_writer is not None:
+        log_to_csv(0, 0, "Sin conexion inicial")
+    textbox.set_text(f'Puerto: {SERIAL_PORT}\nSin conexión - Reintentando...')
+    plt.draw()
+    plt.pause(0.1)
 
 while True:
     try:

@@ -82,6 +82,35 @@ void loop() {
   // Enviar datos solo si hay al menos un sensor operativo
   // Verificar que Serial esté disponible antes de escribir
   if ((sensor1_ok || sensor2_ok) && Serial) {
+
+    static const int SMOOTH_WINDOW = 8; // Tamaño de la ventana de suavizado, puedes cambiarlo
+    static uint16_t d1_buffer[SMOOTH_WINDOW] = {0};
+    static uint16_t d2_buffer[SMOOTH_WINDOW] = {0};
+    static int buffer_index = 0;
+    static bool buffer_filled = false;
+
+    // Insertar nuevos datos en el buffer circular
+    d1_buffer[buffer_index] = d1;
+    d2_buffer[buffer_index] = d2;
+
+    buffer_index++;
+    if (buffer_index >= SMOOTH_WINDOW) {
+      buffer_index = 0;
+      buffer_filled = true;
+    }
+
+    // Calcular el promedio solo si el buffer ya está lleno, si no usar la suma actual
+    uint32_t sum_d1 = 0, sum_d2 = 0;
+    int N = buffer_filled ? SMOOTH_WINDOW : buffer_index;
+    if (N > 0) {
+      for (int i = 0; i < N; i++) {
+        sum_d1 += d1_buffer[i];
+        sum_d2 += d2_buffer[i];
+      }
+      d1 = sum_d1 / N;
+      d2 = sum_d2 / N;
+    }
+
     Serial.print(d1);
     Serial.print(",");
     Serial.println(d2);
