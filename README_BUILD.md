@@ -58,6 +58,8 @@ El ejecutable se creará en la carpeta `dist/SensorMonitor.exe`
 - El tamaño será aproximadamente 50-100 MB porque incluye todas las dependencias
 - Los archivos CSV se crearán en el mismo directorio donde ejecutes el .exe
 - Puedes renombrar y mover el .exe a cualquier lugar, sigue funcionando
+- **Portabilidad completa**: El .exe incluye todas las dependencias necesarias, no requiere instalación de Python ni librerías adicionales
+- **PyQt5 opcional**: Si PyQt5 está instalado durante la compilación, el ejecutable tendrá mejor rendimiento GPU. Si no, usará TkAgg (funciona igual pero más lento)
 
 ## Solución de problemas
 

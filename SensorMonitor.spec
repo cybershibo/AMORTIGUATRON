@@ -1,10 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('requirements.txt', '.')]
+datas = []
 binaries = []
-hiddenimports = ['serial', 'serial.tools.list_ports', 'matplotlib', 'matplotlib.backends.backend_tkagg', 'matplotlib.backends._backend_tk', 'tkinter', 'tkinter.ttk']
+hiddenimports = ['serial', 'serial.tools.list_ports', 'matplotlib', 'matplotlib.backends.backend_tkagg', 'matplotlib.backends.backend_qt5agg', 'matplotlib.backends.backend_qtagg', 'matplotlib.backends._backend_tk', 'tkinter', 'tkinter.ttk']
 tmp_ret = collect_all('matplotlib')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('PyQt5')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 

@@ -1,7 +1,25 @@
 import serial
 import serial.tools.list_ports
 import matplotlib
-matplotlib.use('TkAgg')  # Forzar backend TkAgg para compatibilidad
+# Intentar usar backend Qt5Agg para mejor rendimiento con GPU
+# Si no está disponible, intentar QtAgg, luego TkAgg
+backend_priority = ['Qt5Agg', 'QtAgg', 'TkAgg']
+backend_set = False
+for backend in backend_priority:
+    try:
+        matplotlib.use(backend)
+        backend_set = True
+        if backend.startswith('Qt'):
+            print(f"Usando backend {backend} (aceleración GPU/hardware)")
+        else:
+            print(f"Usando backend {backend} (fallback)")
+        break
+    except Exception:
+        continue
+
+if not backend_set:
+    # Usar el backend por defecto si todos fallan
+    print("Usando backend por defecto de matplotlib")
 import matplotlib.pyplot as plt
 from collections import deque
 import time
@@ -12,7 +30,7 @@ import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-SERIAL_PORT = 'COM1'  # Puerto por defecto
+SERIAL_PORT = None  # Se seleccionará al inicio del programa
 SERIAL_BAUD = 115200
 READ_TIMEOUT = 1.0  # timeout de lectura en segundos
 RECONNECT_DELAY = 2.0  # tiempo de espera antes de reconectar
@@ -49,7 +67,7 @@ def select_com_port():
     # Crear ventana de selección
     root = tk.Tk()
     root.title("Seleccionar Puerto COM")
-    root.geometry("400x250")
+    root.geometry("450x280")
     root.resizable(False, False)
     
     # Centrar ventana
@@ -60,20 +78,21 @@ def select_com_port():
     y = (root.winfo_screenheight() // 2) - (height // 2)
     root.geometry(f'{width}x{height}+{x}+{y}')
     
-    selected_port = tk.StringVar(value=SERIAL_PORT if SERIAL_PORT in available_ports else available_ports[0])
+    # Siempre seleccionar el primer puerto disponible por defecto (no usar valor previo)
+    selected_port = tk.StringVar(value=available_ports[0])
     
     # Frame principal
     main_frame = ttk.Frame(root, padding="20")
     main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
     
     # Título
-    title_label = ttk.Label(main_frame, text="Selecciona el Puerto COM:", font=("Arial", 10, "bold"))
+    title_label = ttk.Label(main_frame, text="Selecciona el Puerto COM (Obligatorio):", font=("Arial", 10, "bold"))
     title_label.grid(row=0, column=0, columnspan=2, pady=(0, 15), sticky=tk.W)
     
     # Información adicional
     info_label = ttk.Label(
         main_frame, 
-        text="Selecciona el puerto donde está conectado tu microcontrolador:",
+        text="Debes seleccionar el puerto donde está conectado tu microcontrolador.\nSi cancelas, el programa se cerrará.",
         font=("Arial", 8)
     )
     info_label.grid(row=1, column=0, columnspan=2, pady=(0, 10), sticky=tk.W)
@@ -134,17 +153,18 @@ def connect_serial():
         if ser is not None and ser.is_open:
             ser.close()
         
+        # Verificar que se haya seleccionado un puerto
+        if SERIAL_PORT is None:
+            print("No se ha seleccionado ningún puerto COM.")
+            return False
+        
         # Verificar que el puerto exista antes de intentar conectar
         available_ports = [port.device for port in serial.tools.list_ports.comports()]
         if SERIAL_PORT not in available_ports:
             print(f"Puerto {SERIAL_PORT} no está disponible.")
-            # Intentar encontrar otro puerto
-            if available_ports:
-                SERIAL_PORT = available_ports[0]
-                print(f"Usando puerto alternativo: {SERIAL_PORT}")
-            else:
-                print("No hay puertos COM disponibles.")
-                return False
+            # No cambiar automáticamente el puerto, el usuario debe seleccionarlo nuevamente
+            print("Por favor, reinicia el programa y selecciona un puerto disponible.")
+            return False
         
         ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=READ_TIMEOUT)
         time.sleep(1)  # esperar a que se estabilice la conexión
@@ -193,6 +213,17 @@ try:
     plt.ion()
     fig, ax = plt.subplots()
     fig.canvas.manager.set_window_title('Monitor de Sensores')
+    
+    # Habilitar renderizado acelerado por hardware (GPU) si está disponible
+    try:
+        fig.canvas.toolbar.configure(accelerated=True)
+    except:
+        pass
+    
+    # Configurar para mejor rendimiento en pantalla completa
+    fig.set_facecolor('white')
+    ax.set_facecolor('white')
+    
     # Forzar actualización inicial de la ventana
     plt.show(block=False)
     plt.pause(0.1)  # Dar tiempo para que la ventana se renderice
@@ -223,8 +254,28 @@ textbox = ax.text(0.98, 0.98, 'Inicializando...', transform=ax.transAxes,
                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
                   fontsize=11, family='monospace')
 
-# Actualizar ventana inicial
-plt.draw()
+# Optimización: Habilitar blitting para actualizar solo las partes que cambian
+# Esto mejora significativamente el rendimiento en pantalla completa
+bg = None
+use_blitting = False
+try:
+    # Configurar blitting para actualización eficiente
+    fig.canvas.draw()
+    bg = fig.canvas.copy_from_bbox(ax.bbox)
+    use_blitting = True
+    print("Blitting habilitado para renderizado optimizado")
+except Exception as e:
+    use_blitting = False
+    print(f"Blitting no disponible: {e}")
+
+# Variables para control de frecuencia de actualización
+last_graph_update = time.time()
+GRAPH_UPDATE_INTERVAL = 1.0 / 60.0  # Actualizar a máximo 60 FPS
+needs_update = False
+
+# Actualizar ventana inicial (ya se hizo draw() en el try anterior si use_blitting es True)
+if not use_blitting:
+    plt.draw()
 plt.pause(0.1)
 
 # Permitir al usuario seleccionar el puerto COM
@@ -243,7 +294,11 @@ MAX_CONSECUTIVE_ERRORS = 10
 
 # Actualizar textbox con el puerto seleccionado
 textbox.set_text(f'Puerto: {SERIAL_PORT}\nConectando...')
-plt.draw()
+if use_blitting:
+    fig.canvas.draw()
+    bg = fig.canvas.copy_from_bbox(ax.bbox)
+else:
+    plt.draw()
 plt.pause(0.1)
 
 # Conectar inicialmente DESPUÉS de que la ventana esté lista
@@ -253,7 +308,11 @@ if not connect_serial():
     if csv_writer is not None:
         log_to_csv(0, 0, "Sin conexion inicial")
     textbox.set_text(f'Puerto: {SERIAL_PORT}\nSin conexión - Reintentando...')
-    plt.draw()
+    if use_blitting:
+        fig.canvas.draw()
+        bg = fig.canvas.copy_from_bbox(ax.bbox)
+    else:
+        plt.draw()
     plt.pause(0.1)
 
 while True:
@@ -271,8 +330,19 @@ while True:
                 textbox.set_text(f'Sensor 1: {current_d1:.1f} mm\n'
                                f'Sensor 2: {current_d2:.1f} mm\n'
                                f'[Sin conexión - Reintentando...]')
+                # Actualización gráfica optimizada
+                if use_blitting:
+                    try:
+                        fig.canvas.restore_region(bg)
+                        ax.draw_artist(textbox)
+                        fig.canvas.blit(ax.bbox)
+                    except:
+                        fig.canvas.draw()
+                        bg = fig.canvas.copy_from_bbox(ax.bbox)
+                else:
+                    plt.draw()
                 time.sleep(RECONNECT_DELAY)
-                plt.pause(0.1)  # mantener la gráfica viva
+                plt.pause(0.05)  # mantener la gráfica viva
                 continue
             else:
                 # Reconexión exitosa
@@ -292,6 +362,20 @@ while True:
                            f'[Timeout]')
             if csv_writer is not None:
                 log_to_csv(current_d1, current_d2, "Timeout lectura")
+            # Actualización gráfica optimizada
+            current_time = time.time()
+            if current_time - last_graph_update >= GRAPH_UPDATE_INTERVAL:
+                if use_blitting:
+                    try:
+                        fig.canvas.restore_region(bg)
+                        ax.draw_artist(textbox)
+                        fig.canvas.blit(ax.bbox)
+                    except:
+                        fig.canvas.draw()
+                        bg = fig.canvas.copy_from_bbox(ax.bbox)
+                else:
+                    plt.draw()
+                last_graph_update = current_time
             plt.pause(0.01)
             continue
         except serial.SerialException:
@@ -313,7 +397,18 @@ while True:
             textbox.set_text(f'Sensor 1: {current_d1:.1f} mm\n'
                            f'Sensor 2: {current_d2:.1f} mm\n'
                            f'[Desconectado - Reconectando...]')
-            plt.pause(0.1)
+            # Actualización gráfica optimizada
+            if use_blitting:
+                try:
+                    fig.canvas.restore_region(bg)
+                    ax.draw_artist(textbox)
+                    fig.canvas.blit(ax.bbox)
+                except:
+                    fig.canvas.draw()
+                    bg = fig.canvas.copy_from_bbox(ax.bbox)
+            else:
+                plt.draw()
+            plt.pause(0.05)
             continue
 
         if not line:
@@ -325,6 +420,20 @@ while True:
             textbox.set_text(f'Sensor 1: {current_d1:.1f} mm\n'
                            f'Sensor 2: {current_d2:.1f} mm\n'
                            f'[Sin datos nuevos]')
+            # Actualización gráfica optimizada (solo si ha pasado suficiente tiempo)
+            current_time = time.time()
+            if current_time - last_graph_update >= GRAPH_UPDATE_INTERVAL:
+                if use_blitting:
+                    try:
+                        fig.canvas.restore_region(bg)
+                        ax.draw_artist(textbox)
+                        fig.canvas.blit(ax.bbox)
+                    except:
+                        fig.canvas.draw()
+                        bg = fig.canvas.copy_from_bbox(ax.bbox)
+                else:
+                    plt.draw()
+                last_graph_update = current_time
             plt.pause(0.01)
             continue
 
@@ -365,10 +474,15 @@ while True:
                 line2.set_ydata(data2)
 
                 # Actualizar límites del eje Y solo si hay datos válidos
+                ylim_changed = False
                 if len(data1) > 0 and len(data2) > 0:
                     ymin = min(min(data1), min(data2)) - 50
                     ymax = max(max(data1), max(data2)) + 50
-                    ax.set_ylim(max(ymin, 0), min(ymax, 2000))
+                    old_ylim = ax.get_ylim()
+                    new_ylim = (max(ymin, 0), min(ymax, 2000))
+                    if old_ylim != new_ylim:
+                        ax.set_ylim(new_ylim)
+                        ylim_changed = True
 
                 # Actualizar textbox con valores actuales
                 textbox.set_text(f'Sensor 1: {current_d1:.1f} mm\n'
@@ -394,11 +508,36 @@ while True:
                     log_to_csv(d1_original, d2_original, estado)
 
                 last_update_time = time.time()
+                needs_update = True
+                
+                # Actualización gráfica optimizada con blitting
+                current_time = time.time()
+                if current_time - last_graph_update >= GRAPH_UPDATE_INTERVAL or ylim_changed:
+                    if use_blitting and not ylim_changed:
+                        # Usar blitting para actualización rápida (solo las líneas)
+                        try:
+                            fig.canvas.restore_region(bg)
+                            ax.draw_artist(line1)
+                            ax.draw_artist(line2)
+                            ax.draw_artist(textbox)
+                            fig.canvas.blit(ax.bbox)
+                        except:
+                            # Si falla el blitting, hacer redibujado completo
+                            fig.canvas.draw()
+                            bg = fig.canvas.copy_from_bbox(ax.bbox)
+                    else:
+                        # Redibujado completo (necesario cuando cambian los límites)
+                        fig.canvas.draw()
+                        if use_blitting:
+                            bg = fig.canvas.copy_from_bbox(ax.bbox)
+                    last_graph_update = current_time
+                    needs_update = False
             except (ValueError, IndexError) as e:
                 # Error al parsear, ignorar esta línea
                 pass
 
-        plt.pause(0.01)
+        # Pausa mínima para mantener la gráfica viva
+        plt.pause(0.001)  # Reducido de 0.01 para mejor rendimiento
         
     except KeyboardInterrupt:
         print("Finalizado por el usuario")
@@ -415,7 +554,21 @@ while True:
                     pass
             ser = None
             consecutive_errors = 0
-        plt.pause(0.1)  # mantener la gráfica viva incluso con errores
+        # Actualización gráfica optimizada incluso con errores
+        current_time = time.time()
+        if current_time - last_graph_update >= GRAPH_UPDATE_INTERVAL:
+            if use_blitting:
+                try:
+                    fig.canvas.restore_region(bg)
+                    ax.draw_artist(textbox)
+                    fig.canvas.blit(ax.bbox)
+                except:
+                    fig.canvas.draw()
+                    bg = fig.canvas.copy_from_bbox(ax.bbox)
+            else:
+                plt.draw()
+            last_graph_update = current_time
+        plt.pause(0.05)  # mantener la gráfica viva incluso con errores
 
 # Cerrar conexión al finalizar
 if ser is not None and ser.is_open:
