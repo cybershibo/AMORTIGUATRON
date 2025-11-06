@@ -180,9 +180,19 @@ def connect_serial():
         traceback.print_exc()
         return False
 
+# Determinar el directorio donde crear el archivo CSV
+# Si se ejecuta como exe de PyInstaller, usar el directorio del ejecutable
+# Si se ejecuta como script, usar el directorio actual
+if getattr(sys, 'frozen', False):
+    # Ejecutándose como exe compilado
+    base_dir = os.path.dirname(sys.executable)
+else:
+    # Ejecutándose como script Python
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
 # Crear nombre del archivo CSV con formato: sesion-YYYYMMDD-HHMMSS.csv
 timestamp_str = session_start_time.strftime("%Y%m%d-%H%M%S")
-csv_filename = f"sesion-{timestamp_str}.csv"
+csv_filename = os.path.join(base_dir, f"sesion-{timestamp_str}.csv")
 
 # Abrir archivo CSV para escritura
 try:
