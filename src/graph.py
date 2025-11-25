@@ -41,6 +41,7 @@ csv_writer = None
 session_start_time = datetime.now()
 was_connected = False
 disconnection_count = 0
+program_running = True  # Flag para controlar si el programa debe seguir ejecutándose
 
 def select_com_port():
     """Muestra una ventana para seleccionar el puerto COM."""
@@ -218,11 +219,59 @@ def log_to_csv(sensor1, sensor2, estado):
         except Exception as e:
             print(f"Error al escribir en CSV: {e}")
 
+# Función para limpiar recursos y salir del programa
+def cleanup_and_exit():
+    """Cierra todas las conexiones y archivos, luego termina el programa."""
+    global ser, csv_file, csv_writer, program_running
+    
+    print("Cerrando programa...")
+    program_running = False
+    
+    # Cerrar conexión serial
+    if ser is not None and ser.is_open:
+        try:
+            ser.close()
+            print("Conexión serial cerrada")
+        except Exception as e:
+            print(f"Error al cerrar conexión serial: {e}")
+    
+    # Cerrar archivo CSV
+    if csv_file is not None:
+        try:
+            # Registrar fin de sesión
+            if csv_writer is not None:
+                csv_writer.writerow(['', '', '', 'Fin de sesion'])
+            csv_file.close()
+            # csv_filename está definida en el scope global del módulo
+            try:
+                print(f"Archivo CSV guardado: {csv_filename}")
+            except NameError:
+                print("Archivo CSV guardado")
+        except Exception as e:
+            print(f"Error al cerrar archivo CSV: {e}")
+    
+    # Cerrar la figura de matplotlib
+    try:
+        plt.close('all')
+    except:
+        pass
+    
+    # Salir del programa
+    sys.exit(0)
+
+# Callback para cuando se cierra la ventana de matplotlib
+def on_close(event):
+    """Se ejecuta cuando el usuario cierra la ventana de matplotlib."""
+    cleanup_and_exit()
+
 # Inicializar matplotlib PRIMERO para asegurar que la ventana se muestre
 try:
     plt.ion()
     fig, ax = plt.subplots()
     fig.canvas.manager.set_window_title('Monitor de Sensores')
+    
+    # Conectar el evento de cierre de ventana
+    fig.canvas.mpl_connect('close_event', on_close)
     
     # Habilitar renderizado acelerado por hardware (GPU) si está disponible
     try:
@@ -328,8 +377,15 @@ if not connect_serial():
         plt.draw()
     plt.pause(0.1)
 
-while True:
+while program_running:
     try:
+        # Verificar si la ventana sigue abierta
+        if not plt.get_fignums():
+            # La ventana fue cerrada
+            print("Ventana cerrada por el usuario")
+            cleanup_and_exit()
+            break
+        
         # Verificar conexión y reconectar si es necesario
         if ser is None or not ser.is_open:
             if was_connected:
@@ -566,6 +622,7 @@ while True:
         
     except KeyboardInterrupt:
         print("Finalizado por el usuario")
+        cleanup_and_exit()
         break
     except Exception as e:
         print(f"Error inesperado: {e}")
@@ -595,17 +652,5 @@ while True:
             last_graph_update = current_time
         plt.pause(0.05)  # mantener la gráfica viva incluso con errores
 
-# Cerrar conexión al finalizar
-if ser is not None and ser.is_open:
-    ser.close()
-
-# Cerrar archivo CSV
-if csv_file is not None:
-    try:
-        # Registrar fin de sesión
-        if csv_writer is not None:
-            csv_writer.writerow(['', '', '', 'Fin de sesion'])
-        csv_file.close()
-        print(f"Archivo CSV guardado: {csv_filename}")
-    except Exception as e:
-        print(f"Error al cerrar archivo CSV: {e}")
+# Limpieza final (por si acaso el bucle terminó de otra manera)
+cleanup_and_exit()
