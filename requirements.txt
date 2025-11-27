@@ -1,3 +1,4 @@
-pyserial>=3.5
-matplotlib>=3.5.0
-PyQt5>=5.15.0
+pyserial
+matplotlib
+pyqt5
+pyside6
